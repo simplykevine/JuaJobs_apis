@@ -1,0 +1,82 @@
+POST http://localhost:8000/api/signup/
+Content-Type: application/json
+
+{
+  "username": "client1235",
+  "email": "client1235@example.com",
+  "password": "password123",
+  "role": "worker"
+}
+
+
+POST http://localhost:8000/api/login/
+Content-Type: application/json
+
+{
+  "email": "client1@example.com",
+  "password": "password123"
+}
+
+
+POST http://localhost:8000/api/jobs/
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQ5OTA4NjQwLCJpYXQiOjE3NDk5MDgzNDAsImp0aSI6IjRhMmZlZGM5MmIxNDRjNTFiNmMyYjYxNTk1ZmM4NWY1IiwidXNlcl9pZCI6NX0.0ffCiojUHNnV5eOWMTNNCZEEmY4JG9lRrb2zRiz_D4g
+
+{
+  "title": "Frontend Developer",
+  "description": "Build and maintain responsive web interfaces.",
+  "requirements": "2+ years experience with React.js, HTML/CSS",
+  "salary_min": 1200.00,
+  "salary_max": 2500.00,
+  "employment_type": "full_time",
+  "location": "Kigali, Rwanda",
+  "remote_work": true,
+  "status": "active",
+  "deadline": "2025-07-30T23:59:59Z"
+}
+
+
+
+POST http://localhost:8000/api/applications/
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzQ5OTA4NjQwLCJpYXQiOjE3NDk5MDgzNDAsImp0aSI6IjRhMmZlZGM5MmIxNDRjNTFiNmMyYjYxNTk1ZmM4NWY1IiwidXNlcl9pZCI6NX0.0ffCiojUHNnV5eOWMTNNCZEEmY4JG9lRrb2zRiz_D4g
+
+
+{
+  "job": 3,
+  "cover_letter": "I am excited to apply and contribute to your project."
+}
+
+
+
+GET http://localhost:8000/api/reviews/
+
+{
+  "reviewer": 1,
+  "reviewee": 2,
+  "job": 1,
+  "rating": 5,
+  "comment": "Excellent work and communication throughout the project."
+}
+
+
+POST http://localhost:8000/api/applications/
+Content-Type: application/json
+Authorization: Bearer 
+
+{
+  "job": 1,
+
+  "cover_letter": //file should be provided
+
+
+POST http://localhost:8000/api/reviews/
+Content-Type: application/json
+Authorization: Bearer 
+
+{
+  "reviewee": 2,
+  "job": 1,
+  "rating": 5,
+  "comment": "Excellent work and communication."
+}
