@@ -18,7 +18,6 @@ from .serializers import (
     UserLoginSerializer
 )
 
-# ------------------- AUTH VIEWS ------------------- #
 
 @method_decorator(csrf_exempt, name='dispatch')
 class UserSignupView(APIView):
@@ -84,7 +83,6 @@ def test_token(request):
     return Response({"message": f"Hello {request.user.username}, your token is valid!"})
 
 
-# ------------------- MODEL VIEWSETS ------------------- #
 
 class JobPostingViewSet(viewsets.ModelViewSet):
     queryset = JobPosting.objects.all()

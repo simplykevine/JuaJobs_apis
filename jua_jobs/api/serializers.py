@@ -9,8 +9,8 @@ class JobPostingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = JobPosting
-        fields = '__all__'  # Or list specific fields if preferred
-        depth = 1  # Optional: Expand related fields
+        fields = '__all__'  
+        depth = 1  
 
     def get_applicants(self, obj):
         applications = obj.applications.select_related('worker')
