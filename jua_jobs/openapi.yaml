@@ -1,0 +1,18 @@
+openapi: 3.1.0
+info:
+  title: JuaJobs API
+  version: '1.0.0'
+  description: |
+    The JuaJobs API enables integration with Africa's leading gig economy platform,
+    connecting skilled workers with clients across the continent.
+    
+    ## Features
+    - User authentication and authorization
+    - Job posting and application management
+    - Worker profile management
+    - Review and rating system
+    - Payment transaction tracking
+    - Skills and category management
+    
+    ## Authentication
+    This API uses JWT (JSON Web Tokens) for authentication. Include the token in the Authorization header:
