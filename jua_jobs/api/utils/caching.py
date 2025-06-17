@@ -10,7 +10,7 @@ def cache_key_generator(prefix, *args, **kwargs):
         'args': args,
         'kwargs': kwargs
     }
-    key_string = json.dumps(key_data, sort_keys=True)
+    key_string = json.dumps(key_data, sort_keys=True, default=str)
     key_hash = hashlib.md5(key_string.encode()).hexdigest()
     return f"{prefix}:{key_hash}"
 
@@ -32,7 +32,6 @@ def cache_result(timeout=300, prefix="api"):
 
 def invalidate_cache_pattern(pattern):
     """Invalidate cache keys matching a pattern"""
-    # This is a simplified version - in production you'd use Redis pattern matching
     if hasattr(cache, 'delete_pattern'):
         cache.delete_pattern(pattern)
     else:
@@ -40,7 +39,7 @@ def invalidate_cache_pattern(pattern):
         cache.clear()
 
 class CacheManager:
-    """Centralized cache management"""
+    """Centralized cache management for JuaJobs API"""
     
     @staticmethod
     def get_job_cache_key(job_id):
@@ -55,11 +54,18 @@ class CacheManager:
         return f"application:{application_id}"
     
     @staticmethod
+    def get_jobs_list_cache_key(filters=None):
+        if filters:
+            filter_hash = hashlib.md5(json.dumps(filters, sort_keys=True).encode()).hexdigest()
+            return f"jobs_list:{filter_hash}"
+        return "jobs_list:all"
+    
+    @staticmethod
     def invalidate_job_cache(job_id):
         cache_key = CacheManager.get_job_cache_key(job_id)
         cache.delete(cache_key)
         # Also invalidate related caches
-        invalidate_cache_pattern(f"job_list:*")
+        invalidate_cache_pattern("jobs_list:*")
     
     @staticmethod
     def invalidate_user_cache(user_id):
@@ -75,3 +81,28 @@ class CacheManager:
     def get_cached_job_data(job_id):
         cache_key = CacheManager.get_job_cache_key(job_id)
         return cache.get(cache_key)
+
+# Performance monitoring utilities
+class PerformanceMonitor:
+    """Simple performance monitoring for API endpoints"""
+    
+    @staticmethod
+    def log_query_count(func):
+        """Decorator to log database query count"""
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            from django.db import connection
+            initial_queries = len(connection.queries)
+            
+            result = func(*args, **kwargs)
+            
+            final_queries = len(connection.queries)
+            query_count = final_queries - initial_queries
+            
+            if query_count > 10:  # Log if more than 10 queries
+                import logging
+                logger = logging.getLogger('api')
+                logger.warning(f"High query count in {func.__name__}: {query_count} queries")
+            
+            return result
+        return wrapper

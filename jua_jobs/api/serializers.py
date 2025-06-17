@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate, get_user_model
-from .models import JobPosting, Application, Review, WorkerProfile, Skill, Category, PaymentTransaction
+from .models import JobPosting, Application, Review, WorkerProfile, Skill, Category, PaymentTransaction, PaymentMethod
+from .utils.african_validators import AfricanPhoneValidator, CurrencyValidator, MobileMoneyValidator
 
 User = get_user_model()
 
@@ -14,6 +15,13 @@ class UserSignupSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'password': {'write_only': True},
         }
+
+    def validate_phone_number(self, value):
+        if value:
+            country = self.initial_data.get('country')
+            validator = AfricanPhoneValidator(country)
+            validator(value)
+        return value
 
     def validate(self, attrs):
         if attrs['password'] != attrs['password_confirm']:
@@ -78,6 +86,11 @@ class WorkerProfileSerializer(serializers.ModelSerializer):
         fields = ['id', 'user', 'title', 'bio', 'skills', 'skill_ids', 'hourly_rate', 
                  'currency', 'experience_years', 'availability', 'created_at', 'updated_at']
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate_currency(self, value):
+        validator = CurrencyValidator()
+        validator(value)
+        return value
 
     def create(self, validated_data):
         skill_ids = validated_data.pop('skill_ids', [])
@@ -222,6 +235,9 @@ class ReviewSerializer(serializers.ModelSerializer):
     # Write-only fields
     reviewee_id = serializers.IntegerField(write_only=True)
     job_id = serializers.IntegerField(write_only=True)
+    
+    # Custom rating field without Django validators to use our custom validation
+    rating = serializers.IntegerField()
 
     class Meta:
         model = Review
@@ -230,7 +246,8 @@ class ReviewSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'reviewer', 'created_at']
 
     def validate_rating(self, value):
-        if not 1 <= value <= 5:
+        # Fix: Custom validation that will override Django's built-in validation
+        if not isinstance(value, int) or not 1 <= value <= 5:
             raise serializers.ValidationError("Rating must be between 1 and 5")
         return value
 
@@ -273,3 +290,34 @@ class PaymentTransactionSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError("Amount must be greater than 0")
         return value
+
+    def validate_currency(self, value):
+        validator = CurrencyValidator()
+        validator(value)
+        return value
+
+class PaymentMethodSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+
+    class Meta:
+        model = PaymentMethod
+        fields = ['id', 'user', 'payment_type', 'phone_number', 'account_details', 
+                 'is_verified', 'is_default', 'created_at']
+        read_only_fields = ['id', 'user', 'is_verified', 'created_at']
+
+    def validate(self, attrs):
+        payment_type = attrs.get('payment_type')
+        phone_number = attrs.get('phone_number')
+        
+        # Validate mobile money requirements
+        if payment_type in ['mpesa', 'airtel_money', 'mtn_mobile_money']:
+            if not phone_number:
+                raise serializers.ValidationError("Phone number is required for mobile money payments")
+            
+            # Get user's country from context
+            request = self.context.get('request')
+            if request and request.user and request.user.country:
+                validator = MobileMoneyValidator()
+                validator(payment_type, phone_number, request.user.country)
+        
+        return attrs

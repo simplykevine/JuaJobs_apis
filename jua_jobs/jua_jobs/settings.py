@@ -26,6 +26,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'django.middleware.gzip.GZipMiddleware',  # Response compression
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -60,6 +61,19 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+    }
+}
+
+# Redis Cache Configuration
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': 'redis://127.0.0.1:6379/1',
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        },
+        'KEY_PREFIX': 'juajobs',
+        'TIMEOUT': 300,  # 5 minutes default
     }
 }
 
@@ -102,7 +116,7 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
+        'rest_framework.permissions.IsAuthenticatedOrReadOnly',  # Changed from IsAuthenticated
     ],
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',
@@ -141,11 +155,26 @@ SIMPLE_JWT = {
 # Spectacular settings for API documentation
 SPECTACULAR_SETTINGS = {
     'TITLE': 'JuaJobs API',
-    'DESCRIPTION': 'API for JuaJobs gig economy platform',
+    'DESCRIPTION': 'API for JuaJobs gig economy platform connecting skilled workers with clients across Africa',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
     'COMPONENT_SPLIT_REQUEST': True,
     'SCHEMA_PATH_PREFIX': '/api/',
+    'CONTACT': {
+        'name': 'JuaJobs API Support',
+        'email': 'api@juajobs.com',
+    },
+    'LICENSE': {
+        'name': 'Proprietary',
+    },
+    # Add authentication info to Swagger
+    'SECURITY': [
+        {
+            'type': 'http',
+            'scheme': 'bearer',
+            'bearerFormat': 'JWT',
+        }
+    ],
 }
 
 # CORS settings
@@ -166,6 +195,21 @@ X_FRAME_OPTIONS = 'DENY'
 # File upload settings
 FILE_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5MB
+
+# African Market Configurations
+AFRICAN_COUNTRIES = {
+    'KE': {'name': 'Kenya', 'currency': 'KES', 'phone_pattern': r'^\+254[17]\d{8}$'},
+    'NG': {'name': 'Nigeria', 'currency': 'NGN', 'phone_pattern': r'^\+234[789]\d{9}$'},
+    'ZA': {'name': 'South Africa', 'currency': 'ZAR', 'phone_pattern': r'^\+27[1-9]\d{8}$'},
+    'UG': {'name': 'Uganda', 'currency': 'UGX', 'phone_pattern': r'^\+256[37]\d{8}$'},
+    'TZ': {'name': 'Tanzania', 'currency': 'TZS', 'phone_pattern': r'^\+255[67]\d{8}$'},
+}
+
+MOBILE_MONEY_PROVIDERS = {
+    'mpesa': {'countries': ['KE'], 'currencies': ['KES']},
+    'airtel_money': {'countries': ['KE', 'UG', 'TZ'], 'currencies': ['KES', 'UGX', 'TZS']},
+    'mtn_mobile_money': {'countries': ['UG', 'ZA'], 'currencies': ['UGX', 'ZAR']},
+}
 
 # Logging configuration
 LOGGING = {

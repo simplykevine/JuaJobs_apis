@@ -3,6 +3,8 @@ from django.db import models
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.conf import settings
+import re
 
 class UserManager(BaseUserManager):
     def create_user(self, email, username=None, password=None, **extra_fields):
@@ -48,6 +50,17 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.email
+
+    def clean(self):
+        super().clean()
+        # Validate phone number for African countries
+        if self.phone_number and self.country:
+            country_config = settings.AFRICAN_COUNTRIES.get(self.country)
+            if country_config:
+                pattern = country_config['phone_pattern']
+                if not re.match(pattern, self.phone_number):
+                    from django.core.exceptions import ValidationError
+                    raise ValidationError(f'Invalid phone number format for {country_config["name"]}')
 
 class Skill(models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -108,6 +121,9 @@ class JobPosting(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     deadline = models.DateTimeField(null=True, blank=True, help_text="Application deadline")
 
+    class Meta:
+        ordering = ['-created_at']  # Fix the UnorderedObjectListWarning
+
     def __str__(self):
         return self.title
 
@@ -158,6 +174,7 @@ class Review(models.Model):
 
     class Meta:
         unique_together = ('reviewer', 'reviewee', 'job')
+        ordering = ['-created_at']  # Fix the UnorderedObjectListWarning
 
     def __str__(self):
         return f"Review by {self.reviewer.email} for {self.reviewee.email}"
@@ -191,4 +208,43 @@ class PaymentTransaction(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     def __str__(self):
-        return f"{self.transaction_type} - {self.amount} {self.currency}"
+        # Format amount to always show 2 decimal places
+        return f"{self.transaction_type} - {self.amount:.2f} {self.currency}"
+
+# African Market Specific Models
+class PaymentMethod(models.Model):
+    PAYMENT_TYPES = [
+        ('mpesa', 'M-Pesa'),
+        ('airtel_money', 'Airtel Money'),
+        ('mtn_mobile_money', 'MTN Mobile Money'),
+        ('bank_transfer', 'Bank Transfer'),
+        ('card', 'Credit/Debit Card'),
+    ]
+    
+    user = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, related_name='payment_methods')
+    payment_type = models.CharField(max_length=20, choices=PAYMENT_TYPES)
+    phone_number = models.CharField(max_length=15, blank=True)
+    account_details = models.JSONField(default=dict)
+    is_verified = models.BooleanField(default=False)
+    is_default = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"{self.user.email} - {self.get_payment_type_display()}"
+
+    def clean(self):
+        super().clean()
+        # Validate mobile money phone numbers
+        if self.payment_type in ['mpesa', 'airtel_money', 'mtn_mobile_money']:
+            if not self.phone_number:
+                from django.core.exceptions import ValidationError
+                raise ValidationError('Phone number is required for mobile money payments')
+            
+            # Validate phone number format based on payment type and user country
+            if self.user.country:
+                country_config = settings.AFRICAN_COUNTRIES.get(self.user.country)
+                if country_config:
+                    pattern = country_config['phone_pattern']
+                    if not re.match(pattern, self.phone_number):
+                        from django.core.exceptions import ValidationError
+                        raise ValidationError(f'Invalid phone number format for {country_config["name"]}')

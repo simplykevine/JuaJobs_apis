@@ -11,13 +11,15 @@ from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import get_user_model
 from django.db.models import Q, Avg, Count
 from django.shortcuts import get_object_or_404
+from django.core.cache import cache
+from drf_spectacular.utils import extend_schema, OpenApiExample
 
-from .models import JobPosting, Application, Review, WorkerProfile, Skill, Category, PaymentTransaction
+from .models import JobPosting, Application, Review, WorkerProfile, Skill, Category, PaymentTransaction, PaymentMethod
 from .serializers import (
     JobPostingSerializer, ApplicationSerializer, ReviewSerializer,
     UserSignupSerializer, UserLoginSerializer, UserSerializer,
     WorkerProfileSerializer, SkillSerializer, CategorySerializer,
-    PaymentTransactionSerializer
+    PaymentTransactionSerializer, PaymentMethodSerializer
 )
 from .permissions import (
     IsOwnerOrReadOnly, IsClientRole, IsWorkerRole,
@@ -27,14 +29,56 @@ from .filters import (
     JobPostingFilter, ApplicationFilter, ReviewFilter,
     WorkerProfileFilter, UserFilter
 )
+from .utils.caching import CacheManager, cache_result
 
 User = get_user_model()
 
-@method_decorator(csrf_exempt, name='dispatch')
 class UserSignupView(APIView):
     permission_classes = [permissions.AllowAny]
-
+    
+    @extend_schema(
+        request=UserSignupSerializer,
+        responses={201: UserSignupSerializer},
+        examples=[
+            OpenApiExample(
+                'Worker Signup Example',
+                summary='Sign up as a worker',
+                description='Example of signing up as a worker with Kenyan phone number',
+                value={
+                    "email": "worker@example.com",
+                    "username": "johnworker",
+                    "password": "password123",
+                    "password_confirm": "password123",
+                    "role": "worker",
+                    "country": "KE",
+                    "phone_number": "+254712345678"
+                },
+                request_only=True,
+            ),
+            OpenApiExample(
+                'Client Signup Example',
+                summary='Sign up as a client',
+                description='Example of signing up as a client',
+                value={
+                    "email": "client@example.com",
+                    "username": "janeclient",
+                    "password": "password123",
+                    "password_confirm": "password123",
+                    "role": "client",
+                    "country": "NG",
+                    "phone_number": "+234812345678"
+                },
+                request_only=True,
+            ),
+        ]
+    )
     def post(self, request):
+        """
+        Create a new user account
+        
+        Register a new user as either a worker or client. Phone number format 
+        must match the country code pattern.
+        """
         serializer = UserSignupSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
@@ -54,11 +98,31 @@ class UserSignupView(APIView):
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-@method_decorator(csrf_exempt, name='dispatch')
 class UserLoginView(APIView):
     permission_classes = [permissions.AllowAny]
-
+    
+    @extend_schema(
+        request=UserLoginSerializer,
+        responses={200: UserLoginSerializer},
+        examples=[
+            OpenApiExample(
+                'Login Example',
+                summary='User login',
+                description='Login with email and password',
+                value={
+                    "email": "test@example.com",
+                    "password": "password123"
+                },
+                request_only=True,
+            ),
+        ]
+    )
     def post(self, request):
+        """
+        Login user and get JWT tokens
+        
+        Authenticate user with email and password, returns access and refresh tokens.
+        """
         serializer = UserLoginSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.validated_data['user']
@@ -78,9 +142,30 @@ class UserLoginView(APIView):
             }, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+@extend_schema(
+    responses={200: dict},
+    examples=[
+        OpenApiExample(
+            'Token Test Response',
+            summary='Valid token response',
+            description='Response when token is valid',
+            value={
+                "message": "Hello testuser, your token is valid!",
+                "user_id": 1,
+                "role": "worker"
+            },
+            response_only=True,
+        ),
+    ]
+)
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def test_token(request):
+    """
+    Test if JWT token is valid
+    
+    Use this endpoint to verify that your JWT token is working correctly.
+    """
     return Response({
         "message": f"Hello {request.user.username}, your token is valid!",
         "user_id": request.user.id,
@@ -120,6 +205,10 @@ class SkillViewSet(viewsets.ModelViewSet):
     ordering_fields = ['name', 'created_at']
     ordering = ['name']
 
+    @cache_result(timeout=3600, prefix="skills")
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
@@ -128,6 +217,10 @@ class CategoryViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'description']
     ordering_fields = ['name', 'created_at']
     ordering = ['name']
+
+    @cache_result(timeout=3600, prefix="categories")
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
 
 class WorkerProfileViewSet(viewsets.ModelViewSet):
     queryset = WorkerProfile.objects.select_related('user').prefetch_related('skills')
@@ -168,7 +261,9 @@ class JobPostingViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     def perform_create(self, serializer):
-        serializer.save(posted_by=self.request.user)
+        job = serializer.save(posted_by=self.request.user)
+        # Invalidate cache after creating new job
+        CacheManager.invalidate_job_cache(job.id)
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -297,16 +392,22 @@ class ReviewViewSet(viewsets.ModelViewSet):
         avg_rating = reviews.aggregate(avg_rating=Avg('rating'))['avg_rating']
         rating_counts = reviews.values('rating').annotate(count=Count('rating'))
         
+        # Handle pagination properly
         page = self.paginate_queryset(reviews)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response({
-                'reviews': serializer.data,
+            # Create custom paginated response with additional data
+            paginated_response = self.get_paginated_response(serializer.data)
+            
+            # Add the additional data to the paginated response
+            paginated_response.data.update({
                 'average_rating': round(avg_rating, 2) if avg_rating else None,
                 'total_reviews': reviews.count(),
                 'rating_distribution': list(rating_counts)
             })
+            return paginated_response
         
+        # Non-paginated response
         serializer = self.get_serializer(reviews, many=True)
         return Response({
             'reviews': serializer.data,
@@ -314,6 +415,14 @@ class ReviewViewSet(viewsets.ModelViewSet):
             'total_reviews': reviews.count(),
             'rating_distribution': list(rating_counts)
         })
+
+    def get_permissions(self):
+        # Allow unauthenticated access to user_reviews action
+        if self.action == 'user_reviews':
+            permission_classes = [permissions.AllowAny]
+        else:
+            permission_classes = [permissions.IsAuthenticated, IsReviewParticipant]
+        return [permission() for permission in permission_classes]
 
 class PaymentTransactionViewSet(viewsets.ModelViewSet):
     queryset = PaymentTransaction.objects.select_related('sender', 'receiver', 'job')
@@ -346,10 +455,61 @@ class PaymentTransactionViewSet(viewsets.ModelViewSet):
             reference_id=reference_id
         )
 
+class PaymentMethodViewSet(viewsets.ModelViewSet):
+    queryset = PaymentMethod.objects.select_related('user')
+    serializer_class = PaymentMethodSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    ordering_fields = ['created_at']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        # Users can only see their own payment methods
+        return self.queryset.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+    @action(detail=True, methods=['post'])
+    def set_default(self, request, pk=None):
+        payment_method = self.get_object()
+        
+        # Remove default from other payment methods
+        PaymentMethod.objects.filter(user=request.user, is_default=True).update(is_default=False)
+        
+        # Set this as default
+        payment_method.is_default = True
+        payment_method.save()
+        
+        serializer = self.get_serializer(payment_method)
+        return Response(serializer.data)
+
 # Analytics and Dashboard Views
+@extend_schema(
+    responses={200: dict},
+    examples=[
+        OpenApiExample(
+            'Dashboard Stats Response',
+            summary='User dashboard statistics',
+            description='Statistics for authenticated user based on their role',
+            value={
+                "total_applications": 5,
+                "pending_applications": 2,
+                "accepted_applications": 2,
+                "profile_exists": True
+            },
+            response_only=True,
+        ),
+    ]
+)
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def dashboard_stats(request):
+    """
+    Get dashboard statistics for the authenticated user
+    
+    Returns different statistics based on user role (client or worker).
+    """
     user = request.user
     
     if user.role == 'client':
@@ -377,9 +537,33 @@ def dashboard_stats(request):
     
     return Response(stats)
 
+@extend_schema(
+    responses={200: dict},
+    examples=[
+        OpenApiExample(
+            'Platform Stats Response',
+            summary='Platform statistics',
+            description='Overall platform statistics available to everyone',
+            value={
+                "total_jobs": 150,
+                "active_jobs": 45,
+                "total_workers": 89,
+                "total_clients": 23,
+                "total_applications": 234,
+                "total_reviews": 67
+            },
+            response_only=True,
+        ),
+    ]
+)
 @api_view(['GET'])
 @permission_classes([permissions.AllowAny])
 def platform_stats(request):
+    """
+    Get overall platform statistics
+    
+    Public endpoint that returns general platform statistics.
+    """
     stats = {
         'total_jobs': JobPosting.objects.count(),
         'active_jobs': JobPosting.objects.filter(status='active').count(),
